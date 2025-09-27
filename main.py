@@ -46,7 +46,7 @@ def on_start(message):
         "Команды: /new_game — начать новую игру.", reply_markup=markup 
     )
     new_game(message)
-    
+
 @bot.message_handler(func=lambda message: message.text == "Таблица лидеров")
 def on_leaderboard(message): 
     leaderboard = "🏆 Таблица лидеров (тестовые данные):\n1. Игрок1 - 10 очков\n2. Игрок2 - 8 очков\n3. Игрок3 - 5 очков"
