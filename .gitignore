@@ -1,0 +1,7 @@
+new_material.py
+.env
+test.py
+test_auth.py
+
+__pycache__/
+*.pyc

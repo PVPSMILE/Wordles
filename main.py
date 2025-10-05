@@ -32,18 +32,40 @@ def norm(s: str) -> str:
          .replace("-", "")
     )
 
-@bot.message_handler(commands=['start'])
-def on_start(message):
+def main_menu_kb():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add(types.KeyboardButton("Новая игра"))
     markup.add(types.KeyboardButton("Авторизация / Регистрация"))
     markup.add(types.KeyboardButton("Таблица лидеров"))
+    return markup
+
+def auth_menu_kb():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(types.KeyboardButton("Регистрация"))
+    markup.add(types.KeyboardButton("Авторизация"))
+    markup.add(types.KeyboardButton("⬅️ Назад в меню"))
+    return markup
+ 
+def cancel_kb():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(types.KeyboardButton("❌ Отмена"))
+    return markup
+
+def reset_game(chat_id):
+    user_state.pop(chat_id, None)
+    
+def reset_auth(chat_id):
+    auth_flow.pop(chat_id, None)
+
+@bot.message_handler(commands=['start'])
+def on_start(message):
+    keyboard = main_menu_kb()
     
     bot.send_message(
         message.chat.id,
         "Привет! Это мини-игра «Слово-загадка».\n"
         "Я загадываю слово — ты вводишь ответ тем же словом.\n"
-        "Команды: /new_game — начать новую игру.", reply_markup=markup 
+        "Команды: /new_game — начать новую игру.", reply_markup=keyboard 
     )
     new_game(message)
 
@@ -54,27 +76,35 @@ def on_leaderboard(message):
 
 @bot.message_handler(func=lambda message: message.text == "Авторизация / Регистрация")
 def on_reg_and_login(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add(types.KeyboardButton("Регистрация"))
-    markup.add(types.KeyboardButton("Авторизация"))
-
-    bot.send_message(message.chat.id, "Выберите действие:", reply_markup=markup)
+    reset_auth(message.chat.id)
+    bot.send_message(message.chat.id, "Выберите действие:", reply_markup=auth_menu_kb())
 
 @bot.message_handler(func=lambda message: message.text == "Регистрация")
 def on_reg(message): 
     chat_id = message.chat.id
+    reset_game(chat_id)
+    
     auth_flow[chat_id] = {"mode": "login", "step": 1, "username": None}
     bot.send_message(chat_id, "Введите ваш username:")
     
 
 @bot.message_handler(func=lambda message: message.text == "Авторизация")
 def on_login(message):
-    pass
+    chat_id = message.chat.id
+    reset_game(chat_id)
+    auth_flow[chat_id] = {"mode": "register", "step": 1, "username": None}
+    bot.send_message(chat_id, "Введите ваш username:")
     
+
 @bot.message_handler(func=lambda message: message.text == "Новая игра")
 def on_new_game(message): 
     new_game(message)
-    
+
+@bot.message_handler(func=lambda message: message.text == "⬅️ Назад в меню")
+def back_to_menu(message):
+    markup = main_menu_kb()
+    bot.send_message(message.chat.id, "Главное меню.", reply_markup=markup)
+
 @bot.message_handler(commands=['new_game'])
 def new_game(message):
     chat_id = message.chat.id
