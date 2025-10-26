@@ -2,6 +2,7 @@ import random
 from telebot import TeleBot, types
 from collections import Counter
 from dotenv import load_dotenv
+from auth import create_user, verify_user, bind_telegram_id
 import os
 
 load_dotenv()
@@ -101,7 +102,7 @@ def on_reg(message):
     chat_id = message.chat.id
     reset_game(chat_id)
     
-    auth_flow[chat_id] = {"mode": "login", "step": 1, "username": None}
+    auth_flow[chat_id] = {"mode": "register", "step": 1, "username": None}
     bot.send_message(chat_id, "Введите ваш username:")
     
 
@@ -109,7 +110,7 @@ def on_reg(message):
 def on_login(message):
     chat_id = message.chat.id
     reset_game(chat_id)
-    auth_flow[chat_id] = {"mode": "register", "step": 1, "username": None}
+    auth_flow[chat_id] = {"mode": "login", "step": 1, "username": None}
     bot.send_message(chat_id, "Введите ваш username:")
     
 
@@ -128,6 +129,50 @@ def new_game(message):
     q, a = random.choice(RIDDLES)
     user_state[chat_id] = {"answer": a, "question": q}
     bot.send_message(chat_id, f"Отгадай загадку:\n\n{q}\n\n(введи слово ответом)")
+
+@bot.message_handler(func=lambda m: m.chat.id in auth_flow)
+def handle_auth(message):
+    chat_id = message.chat.id
+    state = auth_flow.get(chat_id, {})
+    mode = state.get('mode')
+    step = state.get('step')
+    text = message.text.strip()
+    
+    if mode == "register":
+        if step == 1:
+            state['username'] = text
+            state['step'] = 2
+            bot.send_message(chat_id, "Введите пароль для регистрации:")
+            return
+        elif step == 2:
+            try:
+                ok, msg = create_user(state['username'], text)
+            except Exception as e:
+                ok, msg = False, f"Ошибка при регистрации. {e}"
+            if not ok:
+                state['step'] = 1
+                bot.send_message(chat_id, f"Неудалось зарегистроваться: {msg}\nПопробуйте другой username:")
+                return
+    elif mode == "login":
+        if step == 1:
+            state['username'] = text
+            state['step'] = 2
+            bot.send_message(chat_id, "Введите пароль для входа:")
+            return
+        elif step == 2:
+            try:
+                ok, msg = verify_user(state['username'], text)    
+            except Exception as e:
+                ok, msg = False, f"Ошибка при входе. {e}"
+            if not ok:
+                state['step'] = 1
+                bot.send_message(chat_id, f"Неудалось войти: {msg}\nПопробуйте ещё раз. Введите username:")
+                return
+        auth_flow.pop(chat_id, None)
+        bot.send_message(chat_id, f"Успешно! Вы вошли как {state['username']}.", reply_markup=main_menu_kb())
+        return
+        
+                
 
 @bot.message_handler(func=lambda m: m.chat.id in user_state)
 def handle_guess(message):
