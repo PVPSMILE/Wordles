@@ -1,13 +1,18 @@
+# main.py
+import os
 import random
-from telebot import TeleBot, types
 from collections import Counter
 from dotenv import load_dotenv
+from telebot import TeleBot, types
+
+# Прості auth-функції (без хешування)
 from auth import create_user, verify_user, bind_telegram_id
-import os
 
 load_dotenv()
-
 TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise RuntimeError("BOT_TOKEN не найден в .env")
+
 bot = TeleBot(TOKEN)
 
 # База загадок (парами: вопрос, ответ)
@@ -37,91 +42,45 @@ RIDDLES = [
     
 ]
 
-user_state = {}  # chat_id -> {"answer": str, "question": str}
-auth_flow = {} 
+# Состояния
+user_state = {}   # chat_id -> {"answer": str, "question": str}
+auth_flow = {}    # chat_id -> {"mode": "register"|"login", "step": 1|2, "username": str|None}
 
+# ==== helpers ====
 def norm(s: str) -> str:
-    """Нормализация для честного сравнения."""
-    return (
-        s.lower()
-         .replace("ё", "е")
-         .replace("—", "-")
-         .replace(" ", "")
-         .replace("-", "")
-    )
+    return (s or "").lower().replace("ё", "е").replace("—", "-").replace(" ", "").replace("-", "")
 
 def main_menu_kb():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add(types.KeyboardButton("Новая игра"))
-    markup.add(types.KeyboardButton("Авторизация / Регистрация"))
-    markup.add(types.KeyboardButton("Таблица лидеров"))
-    return markup
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(types.KeyboardButton("Новая игра"))
+    kb.add(types.KeyboardButton("Авторизация / Регистрация"))
+    kb.add(types.KeyboardButton("Таблица лидеров"))
+    return kb
 
 def auth_menu_kb():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add(types.KeyboardButton("Регистрация"))
-    markup.add(types.KeyboardButton("Авторизация"))
-    markup.add(types.KeyboardButton("⬅️ Назад в меню"))
-    return markup
- 
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(types.KeyboardButton("Регистрация"))
+    kb.add(types.KeyboardButton("Авторизация"))
+    kb.add(types.KeyboardButton("⬅️ Назад в меню"))
+    return kb
+
 def cancel_kb():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add(types.KeyboardButton("❌ Отмена"))
-    return markup
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(types.KeyboardButton("❌ Отмена"))
+    return kb
 
-def reset_game(chat_id):
-    user_state.pop(chat_id, None)
-    
-def reset_auth(chat_id):
-    auth_flow.pop(chat_id, None)
+def reset_auth(chat_id): auth_flow.pop(chat_id, None)
+def reset_game(chat_id): user_state.pop(chat_id, None)
 
+# ==== команды ====
 @bot.message_handler(commands=['start'])
 def on_start(message):
-    keyboard = main_menu_kb()
-    
     bot.send_message(
         message.chat.id,
         "Привет! Это мини-игра «Слово-загадка».\n"
-        "Я загадываю слово — ты вводишь ответ тем же словом.\n"
-        "Команды: /new_game — начать новую игру.", reply_markup=keyboard 
+        "Команды: /new_game — новая игра, /cancel — отмена действия.",
+        reply_markup=main_menu_kb()
     )
-    new_game(message)
-
-@bot.message_handler(func=lambda message: message.text == "Таблица лидеров")
-def on_leaderboard(message): 
-    leaderboard = "🏆 Таблица лидеров (тестовые данные):\n1. Игрок1 - 10 очков\n2. Игрок2 - 8 очков\n3. Игрок3 - 5 очков"
-    bot.send_message(message.chat.id, leaderboard)
-
-@bot.message_handler(func=lambda message: message.text == "Авторизация / Регистрация")
-def on_reg_and_login(message):
-    reset_auth(message.chat.id)
-    bot.send_message(message.chat.id, "Выберите действие:", reply_markup=auth_menu_kb())
-
-@bot.message_handler(func=lambda message: message.text == "Регистрация")
-def on_reg(message): 
-    chat_id = message.chat.id
-    reset_game(chat_id)
-    
-    auth_flow[chat_id] = {"mode": "register", "step": 1, "username": None}
-    bot.send_message(chat_id, "Введите ваш username:")
-    
-
-@bot.message_handler(func=lambda message: message.text == "Авторизация")
-def on_login(message):
-    chat_id = message.chat.id
-    reset_game(chat_id)
-    auth_flow[chat_id] = {"mode": "login", "step": 1, "username": None}
-    bot.send_message(chat_id, "Введите ваш username:")
-    
-
-@bot.message_handler(func=lambda message: message.text == "Новая игра")
-def on_new_game(message): 
-    new_game(message)
-
-@bot.message_handler(func=lambda message: message.text == "⬅️ Назад в меню")
-def back_to_menu(message):
-    markup = main_menu_kb()
-    bot.send_message(message.chat.id, "Главное меню.", reply_markup=markup)
 
 @bot.message_handler(commands=['new_game'])
 def new_game(message):
@@ -130,54 +89,110 @@ def new_game(message):
     user_state[chat_id] = {"answer": a, "question": q}
     bot.send_message(chat_id, f"Отгадай загадку:\n\n{q}\n\n(введи слово ответом)")
 
+@bot.message_handler(commands=['cancel'])
+def cmd_cancel(message):
+    reset_auth(message.chat.id)
+    bot.send_message(message.chat.id, "Ок, отменил текущее действие.", reply_markup=main_menu_kb())
+
+# ==== главное меню ====
+@bot.message_handler(func=lambda m: m.text == "Новая игра")
+def on_new_game(message): 
+    new_game(message)
+
+@bot.message_handler(func=lambda m: m.text == "Таблица лидеров")
+def on_leaderboard(message): 
+    leaderboard = "🏆 Таблица лидеров (тест):\n1. Игрок1 - 10\n2. Игрок2 - 8\n3. Игрок3 - 5"
+    bot.send_message(message.chat.id, leaderboard)
+
+@bot.message_handler(func=lambda m: m.text == "Авторизация / Регистрация")
+def on_reg_and_login(message):
+    reset_auth(message.chat.id)
+    bot.send_message(message.chat.id, "Выберите действие:", reply_markup=auth_menu_kb())
+
+@bot.message_handler(func=lambda m: m.text == "⬅️ Назад в меню")
+def back_to_menu(message):
+    reset_auth(message.chat.id)
+    bot.send_message(message.chat.id, "Главное меню.", reply_markup=main_menu_kb())
+
+# ==== флоу Регистрация / Авторизация ====
+@bot.message_handler(func=lambda m: m.text == "Регистрация")
+def reg_start(message):
+    chat_id = message.chat.id
+    reset_game(chat_id)  # чтобы игра не перехватывала ввод
+    auth_flow[chat_id] = {"mode": "register", "step": 1, "username": None}
+    bot.send_message(chat_id, "Введите ваш username:", reply_markup=cancel_kb())
+
+@bot.message_handler(func=lambda m: m.text == "Авторизация")
+def login_start(message):
+    chat_id = message.chat.id
+    reset_game(chat_id)  # чтобы игра не перехватывала ввод
+    auth_flow[chat_id] = {"mode": "login", "step": 1, "username": None}
+    bot.send_message(chat_id, "Введите ваш username:", reply_markup=cancel_kb())
+
+@bot.message_handler(func=lambda m: m.text == "❌ Отмена")
+def on_cancel_btn(message):
+    cmd_cancel(message)
+
 @bot.message_handler(func=lambda m: m.chat.id in auth_flow)
 def handle_auth(message):
     chat_id = message.chat.id
-    state = auth_flow.get(chat_id, {})
-    mode = state.get('mode')
-    step = state.get('step')
-    text = message.text.strip()
-    
+    st = auth_flow.get(chat_id, {})
+    mode = st.get("mode")
+    step = st.get("step", 0)
+    text = (message.text or "").strip()
+
+    # Регистрация: username -> password
     if mode == "register":
         if step == 1:
-            state['username'] = text
-            state['step'] = 2
-            bot.send_message(chat_id, "Введите пароль для регистрации:")
+            st["username"], st["step"] = text, 2
+            bot.send_message(chat_id, "Введите пароль:")
             return
-        elif step == 2:
+        if step == 2:
             try:
-                ok, msg = create_user(state['username'], text)
+                ok, msg = create_user(st["username"], text)
             except Exception as e:
-                ok, msg = False, f"Ошибка при регистрации. {e}"
+                ok, msg = False, f"Ошибка БД: {e}"
             if not ok:
-                state['step'] = 1
-                bot.send_message(chat_id, f"Неудалось зарегистроваться: {msg}\nПопробуйте другой username:")
+                st["step"] = 1
+                bot.send_message(chat_id, f"Не удалось зарегистрировать: {msg}\nВведите другой username:")
                 return
-    elif mode == "login":
-        if step == 1:
-            state['username'] = text
-            state['step'] = 2
-            bot.send_message(chat_id, "Введите пароль для входа:")
+            # Привязка chat_id (не критично, поэтому без жёсткой обработки ошибок)
+            try:
+                bind_telegram_id(st["username"], chat_id)
+            except Exception:
+                pass
+            reset_auth(chat_id)
+            bot.send_message(chat_id, "✅ Регистрация успешна!", reply_markup=main_menu_kb())
             return
-        elif step == 2:
-            try:
-                ok, msg = verify_user(state['username'], text)    
-            except Exception as e:
-                ok, msg = False, f"Ошибка при входе. {e}"
-            if not ok:
-                state['step'] = 1
-                bot.send_message(chat_id, f"Неудалось войти: {msg}\nПопробуйте ещё раз. Введите username:")
-                return
-        auth_flow.pop(chat_id, None)
-        bot.send_message(chat_id, f"Успешно! Вы вошли как {state['username']}.", reply_markup=main_menu_kb())
-        return
-        
-                
 
-@bot.message_handler(func=lambda m: m.chat.id in user_state)
+    # Авторизация: username -> password
+    if mode == "login":
+        if step == 1:
+            st["username"], st["step"] = text, 2
+            bot.send_message(chat_id, "Введите пароль:")
+            return
+        if step == 2:
+            try:
+                ok, msg = verify_user(st["username"], text)
+            except Exception as e:
+                ok, msg = False, f"Ошибка БД: {e}"
+            if not ok:
+                st["step"] = 1
+                bot.send_message(chat_id, f"Вход неуспешен: {msg}\nВведите username ещё раз:")
+                return
+            try:
+                bind_telegram_id(st["username"], chat_id)
+            except Exception:
+                pass
+            reset_auth(chat_id)
+            bot.send_message(chat_id, "✅ Вход успешен!", reply_markup=main_menu_kb())
+            return
+
+# ==== игра ====
+@bot.message_handler(func=lambda m: (m.chat.id in user_state) and (m.chat.id not in auth_flow))
 def handle_guess(message):
     chat_id = message.chat.id
-    guess_raw = message.text.strip()
+    guess_raw = (message.text or "").strip()
     answer_raw = user_state[chat_id]["answer"]
 
     guess = norm(guess_raw)
@@ -190,23 +205,19 @@ def handle_guess(message):
 
     # Подсветка угаданных позиций + сбор статистики
     result = []
-    correct_letters = set()
     misplaced_letters = set()
     wrong_letters = set()
-
-    # Подсчёт частот для корректной «misplaced» логики
     answer_counter = Counter(answer)
 
-    # Сначала отметим точные совпадения и вычтем их из частот
+    # Точные совпадения
     for i, ch in enumerate(guess):
         if ch == answer[i]:
             result.append(ch)
-            correct_letters.add(ch)
             answer_counter[ch] -= 1
         else:
             result.append("_")
 
-    # Затем отметим «на месте/не на месте»
+    # Есть в слове, но не на месте / нет в слове
     for i, ch in enumerate(guess):
         if result[i] == "_":
             if answer_counter.get(ch, 0) > 0:
@@ -215,15 +226,13 @@ def handle_guess(message):
             else:
                 wrong_letters.add(ch)
 
-    # Проверка победы
+    # Победа
     if "".join(result) == answer:
         bot.send_message(chat_id, f"🎉 Правильно! Это «{answer_raw}».")
-        # Сброс и предложение новой игры
         user_state.pop(chat_id, None)
         bot.send_message(chat_id, "Хочешь ещё? Нажми /new_game")
         return
 
-    # Формирование сообщения о прогрессе
     parts = [f"Результат: {' '.join(result)}"]
     if misplaced_letters:
         parts.append("Есть, но не на своих местах: " + ", ".join(sorted(misplaced_letters)))
@@ -233,4 +242,5 @@ def handle_guess(message):
     bot.send_message(chat_id, "\n".join(parts))
     bot.send_message(chat_id, "Попробуй ещё раз!")
 
-bot.polling(none_stop=True)
+if __name__ == "__main__":
+    bot.polling(none_stop=True, timeout=60)
